@@ -1,0 +1,318 @@
+================================================================================
+  CONCEPT
+================================================================================
+
+A reusable terminal component for Quartz projects. Renders a scrollable,
+ANSI-colour-aware output buffer with a live input row and a blinking cursor.
+Commands are dispatched via a callback. Shell execution and built-in commands
+(cd, pwd, clear) are handled by run_command in logic/.
+
+================================================================================
+  CANVAS VARS
+================================================================================
+
+_tb  : f32   — cursor blink timer, increments each tick, resets at 0.53s
+_to  : bool  — cursor blink on/off state, toggled when _tb resets
+
+================================================================================
+  CONSTANTS  (src/constants.rs)
+================================================================================
+
+TERM_FONT_SIZE    f32    Default font size in logical pixels.
+TERM_LINE_HEIGHT  f32    Line height multiplier (font_size * line_height = px).
+TERM_PAD_X        f32    Horizontal padding inside the terminal panel.
+TERM_PAD_Y        f32    Vertical padding inside the terminal panel.
+TERM_SCROLLBACK   usize  Maximum number of lines kept in the output buffer.
+
+================================================================================
+  PREFERENCES  (src/preferences.rs)
+================================================================================
+
+TermSettings — runtime-configurable appearance and layout for the terminal.
+All fields have defaults drawn from constants. Passed into mount() as
+Option<Shared<TermSettings>> so the caller can omit it or share it.
+
+  font_size    f32     Render size of terminal text.
+  line_height  f32     Line height multiplier.
+  pad_x        f32     Left/right inner padding.
+  pad_y        f32     Top inner padding.
+  offset_x     f32     X position of the terminal panel on the canvas.
+  offset_y     f32     Y position of the terminal panel on the canvas.
+  bg           Color   Background fill colour.
+  col_text     Color   Default output text colour.
+  col_prompt   Color   Prompt ("> ") and echo line colour.
+  col_input    Color   User input text colour (currently same as col_prompt).
+  col_cursor   Color   Cursor and prompt accent colour.
+  col_error    Color   Error line and non-zero exit code colour.
+  scrollback   usize   Max lines before oldest are dropped.
+
+  Helpers:
+    lh() -> f32   font_size * line_height
+    cw() -> f32   font_size * 0.60  (approximate monospace char width)
+
+================================================================================
+  INTERNAL TYPES  (src/terminal/)
+================================================================================
+
+These live inside the terminal/ submodule. They are not exposed through lib.rs.
+Logic and objects access them via crate::terminal::.
+
+--------------------------------------------------------------------------------
+  terminal/ansi.rs
+--------------------------------------------------------------------------------
+
+StyledSpan  — a run of text with an optional foreground Color.
+parse_ansi  — strips ANSI escape sequences from a string and returns a Vec of
+              StyledSpans with resolved colors. Supports 16-color, 256-color,
+              and 24-bit RGB sequences.
+
+--------------------------------------------------------------------------------
+  terminal/line.rs
+--------------------------------------------------------------------------------
+
+LineKind  — Output | Stderr | Err | Echo
+Line      — a single terminal line: text, kind, and a lazily-populated
+            spans_cache used for rendering.
+
+  Constructors:
+    Line::output(s)              — normal command output
+    Line::stderr(s)              — stderr output (same color as output)
+    Line::error(s)               — error / non-zero exit (rendered in col_error)
+    Line::echo(s)   (pub crate)  — echoed input line (rendered in col_prompt)
+    Line::precolored(segments)   — pre-colored line from &[("text", Option<Color>)].
+                                   Used by lib.rs for the welcome message.
+                                   Callers never need to import StyledSpan.
+
+  get_spans() — lazily parses ANSI or returns plain span, caches result.
+
+--------------------------------------------------------------------------------
+  terminal/state.rs
+--------------------------------------------------------------------------------
+
+StreamMsg  (pub crate)  — Stdout(String) | Stderr(String) | Done(Option<i32>)
+  Messages sent from the background thread running a shell command.
+
+State  (pub crate)  — the full mutable state of the terminal:
+  buf           Vec<Line>              output buffer (capped at scrollback)
+  input         String                 current user input
+  cursor_col    usize                  cursor position in input (char index)
+  scroll        f32                    vertical scroll offset in pixels
+  scroll_vel    f32                    vertical scroll momentum
+  h_scroll      f32                    horizontal scroll offset in pixels
+  h_scroll_vel  f32                    horizontal scroll momentum
+  stream_rx     Option<Receiver<...>>  live channel from a running command
+  child         Option<Child>          handle to the running process for kill()
+  running       bool                   true while a command is executing
+  slot_count    usize                  number of text slot GameObjects spawned
+  dirty         bool                   true when buffer changed this tick
+  scrollback    usize                  max buffer length
+  history       Vec<String>            command history, newest at end
+  history_idx   Option<usize>          current position when browsing history;
+                                       None means not browsing (live input)
+
+  Methods:
+    push(line)              — append line, trim buffer, set dirty
+    snap_bottom(lh, vh)     — scroll to show input row at bottom
+    clamp_v(lh, vh)         — clamp scroll within valid range
+    drain_stream() -> bool  — pull pending StreamMsgs into buf, return if changed
+    kill_child()            — kill the running child process, reap it via wait(),
+                              set stream_rx = None and running = false
+
+spawn_streaming(shell, cmd, wd) -> Result<(Receiver<StreamMsg>, Child), String>
+  Spawns the command in a background thread, piping stdout and stderr into the
+  channel. Returns the receiver and the Child handle so the caller can store
+  the child for later kill(). Sends Done when stdout and stderr threads finish.
+
+char_to_byte(s, char_idx) -> usize
+  Converts a char index to a byte offset for safe String::remove / insert.
+
+--------------------------------------------------------------------------------
+  terminal/text.rs
+--------------------------------------------------------------------------------
+
+build_line_text(line, default_color, font, fs, lh) -> Text
+  Renders a Line into a quartz Text object, applying per-span colors from
+  the spans_cache. Used by logic/terminal_obj.rs in on_update.
+
+make_plain_text(text, color, font, fs, lh) -> Text
+  Renders a plain single-color string into a quartz Text object. Used for
+  the input row and for blank slot placeholders.
+
+--------------------------------------------------------------------------------
+  terminal/mod.rs
+--------------------------------------------------------------------------------
+
+Re-exports ansi, line, state, text as submodules.
+
+Terminal  (pub, Clone)  — the public handle returned by mount().
+  settings  Shared<TermSettings>   caller can read/write settings at runtime
+  state     Shared<State>          pub(crate) — internal use only
+
+  Methods:
+    push(line)           — append a Line to the buffer
+    push_many(lines)     — append multiple Lines
+    clear()              — wipe buffer and reset h_scroll
+    is_running() -> bool — true while a command is in flight
+
+================================================================================
+  OBJECTS  (src/objects/)
+================================================================================
+
+Each file has a single pub fn setup(cv: &mut Canvas, ...).
+Construction only — no events, no on_update.
+
+--------------------------------------------------------------------------------
+  objects/terminal_obj.rs
+--------------------------------------------------------------------------------
+
+Builds the two GameObjects the terminal needs and sets the blink canvas vars.
+
+  term_bg
+    position   (offset_x, offset_y)   — from TermSettings
+    size       (1.0, 1.0)             — resized each tick in on_update
+    layer      0
+    image      tint_overlay(bg)       — resized in on_update when bounds change
+
+  term_cursor
+    position   (-9999, -9999)         — hidden off-screen until on_update places it
+    size       (2.0, 14.0)            — 2px wide vertical line
+    layer      6
+    image      tint_overlay(col_cursor)
+
+  Canvas vars set here:
+    _tb  f32    0.0   blink timer
+    _to  bool   true  blink on
+
+================================================================================
+  LOGIC  (src/logic/)
+================================================================================
+
+--------------------------------------------------------------------------------
+  logic/terminal_obj.rs
+--------------------------------------------------------------------------------
+
+Registers all three canvas callbacks for the terminal. No object construction.
+
+pub fn register(cv, state, settings, font, on_command, terminal)
+
+  on_key_press
+    Guards on mouse position — ignores keys when mouse is outside the panel.
+    Resets blink timer on every keypress so cursor stays visible while typing.
+    Modifier state read via cv.is_key_held(&Key::Named(NamedKey::Control)).
+
+    Ctrl combos (handled before the running guard so Ctrl+C always fires):
+      Ctrl+C   — kill_child(), push "^C" echo line, clear input,
+                 reset history_idx, snap_bottom
+      Ctrl+L   — t.clear()
+      Ctrl+A   — cursor to start of input
+      Ctrl+E   — cursor to end of input
+      Ctrl+U   — delete from cursor back to start of input
+      Ctrl+K   — delete from cursor to end of input
+
+    All other input ignored while a command is running.
+
+    Bare keys:
+      ArrowUp    — walk backward through history; loads entry into input,
+                   cursor to end; stops at oldest entry
+      ArrowDown  — walk forward through history; past newest clears input
+                   and resets history_idx to None
+      Enter      — trims input, echoes "> cmd", clears input,
+                   resets history_idx, calls on_command, snap_bottom
+      Backspace  — removes char before cursor
+      Delete     — same as Backspace
+      ArrowLeft  — move cursor left
+      ArrowRight — move cursor right
+      Home       — cursor to start
+      End        — cursor to end
+      Space      — insert space at cursor
+      Character  — insert printable char at cursor; resets history_idx
+
+  on_mouse_scroll
+    Guards on mouse position — ignores scroll outside the panel.
+    Applies momentum to scroll_vel (vertical) and h_scroll_vel (horizontal).
+    Velocity decays at 0.88x per tick in on_update.
+
+  on_update
+    Resizes term_bg if canvas bounds have changed.
+    Drains stream_rx and snaps scroll to bottom on new output.
+    Steps vertical and horizontal scroll physics (decay + clamp).
+    v_scroll_max includes an extra lh of room so the input row is never
+      clipped below the visible area.
+    Spawns tl_N text slot GameObjects on demand (clipped, layer 3).
+    Each tick: maps visible lines to slots, sets position and drawable.
+      — output/stderr lines: build_line_text with ANSI colors
+      — input row: make_plain_text with prompt prefix ("> " or "… ")
+    Updates cursor position, visibility, and blink state.
+
+
+
+================================================================================
+  TAB VISIBILITY
+================================================================================
+
+When the active tab is not 0 (terminal), all terminal GameObjects are hidden
+and kept hidden every frame. This is enforced in two places:
+
+  logic/tabbar_obj.rs  on_mouse_press
+    On every tab switch, immediately sets visible = false on:
+      term_bg, term_cursor, term_input, and all tl_N text slots.
+    Sets canvas var term_visible to (new_tab == 0).
+
+  logic/terminal_obj.rs  on_update
+    At the top of on_update, checks cv.get_u8("tab_active") != 0.
+    If true: hides all terminal objects, drains stream_rx so background
+    processes are not stalled, then returns early — skipping all layout,
+    text slot updates, cursor placement, and scroll physics.
+    This prevents on_update from overwriting the visibility set by the
+    tab switch handler on every subsequent frame.
+
+State (State in terminal/state.rs) continues running regardless of tab.
+Running commands are unaffected; their output accumulates in buf and
+renders correctly when the user switches back to tab 0.
+
+
+--------------------------------------------------------------------------------
+  logic/run_command.rs
+--------------------------------------------------------------------------------
+
+Standalone logic — no matching object file.
+
+pub fn run_command(raw_cmd, t: &Terminal, cwd: &Shared<String>)
+  Pushes cmd to state.history (skipping exact duplicates of the last entry)
+  and resets state.history_idx = None before dispatching.
+
+  Built-in commands handled inline:
+    clear / cls   — t.clear()
+    pwd           — push current directory as output line
+    cd <dir>      — canonicalize target, update cwd, push confirmation or error
+
+  All other commands:
+    Reads SHELL env var (falls back to /bin/sh).
+    Calls spawn_streaming which returns Result<(Receiver, Child), String>.
+    On Ok: sets state.stream_rx, state.child, state.running = true.
+    On Err: pushes an error line.
+    on_update drains the stream each tick via drain_stream().
+    drain_stream calls child.wait() on natural exit (Done message).
+
+================================================================================
+  LIB  (src/lib.rs)
+================================================================================
+
+Module declarations and re-exports only. No logic.
+
+  pub use terminal::Terminal
+  pub use terminal::line::{Line, LineKind}
+  pub use logic::run_command::run_command
+
+pub fn mount(ctx, scene, layer_id, font_bytes, settings, on_command) -> Terminal
+  Creates State and Terminal.
+  Pushes three welcome lines using Line::precolored (no StyledSpan needed).
+  Calls objects::terminal_obj::setup to add GameObjects.
+  Calls logic::terminal_obj::register to wire all callbacks.
+  Returns the Terminal handle.
+
+================================================================================
+  RESOURCES
+================================================================================
+
+No resources owned by this crate. Font bytes are passed in by the caller.
