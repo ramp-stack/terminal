@@ -156,9 +156,3 @@ The `on_update` tick drives everything: draining the stream channel from any run
 All mutable state lives in a `Shared<State>` inside the `Terminal` handle. The caller never needs to touch it directly.
 
 Running commands are unaffected by panel visibility — output accumulates in the buffer regardless of whether the terminal is on screen, and renders correctly when it becomes visible again.
-
----
-
-## License
-
-See `LICENSE` for details.
