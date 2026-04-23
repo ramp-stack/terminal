@@ -1,7 +1,7 @@
 # Terminal
 
 <p align="center">
-  <img src="./resources/terminal_ref.png" alt="Terminal" width="800"/>
+  <img src="./resources/terminal_ref.png" alt="Terminal" width="400"/>
 </p>
 
 <p align="center">
