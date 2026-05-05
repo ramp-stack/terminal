@@ -24,13 +24,11 @@ fn remove_terminal_objects(cv: &mut Canvas) {
 
 pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
 
-    // ── Initialise canvas vars (prevent typed-getter panics on missing keys) ──
     if !cv.has_var("tab_active")         { cv.set_var("tab_active",         0u8);   }
     if !cv.has_var("_tab_icons_loaded")  { cv.set_var("_tab_icons_loaded",  false); }
     if !cv.has_var("_term_objects_exist"){ cv.set_var("_term_objects_exist", false); }
     if !cv.has_var("_term_panel_y")      { cv.set_var("_term_panel_y",       0.0f32); }
 
-    // on_mouse_press
     {
         let settings = settings.clone();
         cv.on_mouse_press(move |cv, btn, (mx, my)| {
@@ -53,17 +51,16 @@ pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
             let old_tab = cv.get_u8("tab_active");
             cv.set_var("tab_active", new_tab);
 
-            // Swap icon images
             for i in 0..TAB_COUNT {
                 let is_active = i as u8 == new_tab;
                 let path = if is_active { ICON_PATHS[i] } else { ICON_PATHS_UNSELECTED[i] };
-                let icon = load_image_sized(path, ICON_SIZE, ICON_SIZE);
+                let bytes = std::fs::read(path).unwrap_or_default();
+                let icon = load_image_sized(&bytes, ICON_SIZE, ICON_SIZE);
                 if let Some(o) = cv.get_game_object_mut(tab_name(i)) {
                     o.set_image(icon);
                 }
             }
 
-            // Remove terminal objects when leaving tab 0
             if old_tab == 0 && new_tab != 0 {
                 remove_terminal_objects(cv);
                 cv.set_var("_term_objects_exist", false);
@@ -75,18 +72,17 @@ pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
         });
     }
 
-    // on_update
     {
         let settings = settings.clone();
 
         cv.on_update(move |cv| {
-            // Deferred icon load frame 1
             if !cv.get_bool("_tab_icons_loaded") {
                 cv.set_var("_tab_icons_loaded", true);
                 let active = cv.get_u8("tab_active");
                 for i in 0..TAB_COUNT {
                     let path = if i as u8 == active { ICON_PATHS[i] } else { ICON_PATHS_UNSELECTED[i] };
-                    let icon = load_image_sized(path, ICON_SIZE, ICON_SIZE);
+                    let bytes = std::fs::read(path).unwrap_or_default();
+                    let icon = load_image_sized(&bytes, ICON_SIZE, ICON_SIZE);
                     if let Some(o) = cv.get_game_object_mut(tab_name(i)) {
                         o.set_image(icon);
                     }
@@ -98,7 +94,6 @@ pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
             let (cw, _) = cv.canvas_size();
             let full_w  = (cw - ox).max(1.0);
 
-            // Background
             if let Some(o) = cv.get_game_object_mut("tabbar_bg") {
                 o.position = (ox, tab_y);
                 if (o.size.0 - full_w).abs() > 0.5 {
@@ -107,7 +102,6 @@ pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
                 }
             }
 
-            // Separator
             if let Some(o) = cv.get_game_object_mut("tabbar_sep") {
                 o.position = (ox, tab_y + TAB_H - 1.0);
                 if (o.size.0 - full_w).abs() > 0.5 {
@@ -116,7 +110,6 @@ pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
                 }
             }
 
-            // Tab slots, accent bars, dividers
             let div_h         = TAB_H * DIV_H_FRAC;
             let div_y         = tab_y + (TAB_H - div_h) * 0.5;
             let icon_x_offset = (TAB_W - ICON_SIZE) * 0.5;
@@ -142,7 +135,6 @@ pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
                 }
             }
 
-            // Chat panel
             let (_, ch) = cv.canvas_size();
             let panel_h = (ch - tab_y - TAB_H).max(1.0);
             if let Some(o) = cv.get_game_object_mut("tabbar_chat_msg") {
