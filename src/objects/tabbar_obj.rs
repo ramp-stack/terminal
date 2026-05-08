@@ -1,18 +1,18 @@
-use quartz::{Canvas, Color, GameObject};
-use quartz::tint_overlay;
 use crate::preferences::TermSettings;
-use crate::tabbar::{TAB_H, TAB_W, DIV_W, DIV_H_FRAC, TAB_COUNT};
+use crate::tabbar::{DIV_H_FRAC, DIV_W, TAB_COUNT, TAB_H, TAB_W};
+use quartz::tint_overlay;
+use quartz::{Canvas, Color, GameObject};
 
-pub const ICON_PATHS: [&str; TAB_COUNT] = [
-    "resources/terminal.png",
-    "resources/view.png",
-    "resources/chat.png",
+pub const ICON_PATHS: [&[u8]; TAB_COUNT] = [
+    include_bytes!("../../resources/terminal.png"),
+    include_bytes!("../../resources/view.png"),
+    include_bytes!("../../resources/chat.png"),
 ];
 
-pub const ICON_PATHS_UNSELECTED: [&str; TAB_COUNT] = [
-    "resources/unselected_terminal.png",
-    "resources/unselected_view.png",
-    "resources/unselected_chat.png",
+pub const ICON_PATHS_UNSELECTED: [&[u8]; TAB_COUNT] = [
+    include_bytes!("../../resources/unselected_terminal.png"),
+    include_bytes!("../../resources/unselected_view.png"),
+    include_bytes!("../../resources/unselected_chat.png"),
 ];
 
 pub const ICON_SIZE: f32 = crate::tabbar::ICON_SIZE;
@@ -42,9 +42,9 @@ pub fn setup(cv: &mut Canvas, _settings: &TermSettings) {
 
     for i in 0..TAB_COUNT {
         // ── Icon ─────────────────────────────────────────────────────────────
-        let name        = tab_name(i);
+        let name = tab_name(i);
         let placeholder = tint_overlay(ICON_SIZE, ICON_SIZE, Color(0, 0, 0, 0));
-        let icon_obj    = GameObject::build(name)
+        let icon_obj = GameObject::build(name)
             .position(-9999.0, -9999.0)
             .size(ICON_SIZE, ICON_SIZE)
             .layer(11)
@@ -53,9 +53,9 @@ pub fn setup(cv: &mut Canvas, _settings: &TermSettings) {
         cv.add_game_object(name.into(), icon_obj);
 
         // ── Vertical divider between tab slots ────────────────────────────────
-        let div_h    = TAB_H * DIV_H_FRAC;
+        let div_h = TAB_H * DIV_H_FRAC;
         let div_name = format!("tabbar_div_{}", i);
-        let div_obj  = GameObject::build(div_name.clone())
+        let div_obj = GameObject::build(div_name.clone())
             .position(-9999.0, -9999.0)
             .size(DIV_W, div_h)
             .layer(9)
@@ -75,7 +75,7 @@ pub fn setup(cv: &mut Canvas, _settings: &TermSettings) {
         cv.add_game_object("tabbar_chat_msg".into(), obj);
     }
 
-    cv.set_var("tab_active",        0u8);
+    cv.set_var("tab_active", 0u8);
     cv.set_var("_tab_icons_loaded", false);
 }
 
