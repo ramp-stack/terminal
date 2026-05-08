@@ -74,8 +74,7 @@ pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
                 } else {
                     ICON_PATHS_UNSELECTED[i]
                 };
-                let bytes = std::fs::read(path).unwrap_or_default();
-                let icon = load_image_sized(&bytes, ICON_SIZE, ICON_SIZE);
+                let icon = load_image_sized(path, ICON_SIZE, ICON_SIZE);
                 if let Some(o) = cv.get_game_object_mut(tab_name(i)) {
                     o.set_image(icon);
                 }
@@ -105,9 +104,7 @@ pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
                     } else {
                         ICON_PATHS_UNSELECTED[i]
                     };
-                    let bytes = std::fs::read(path)
-                        .expect(&format!("Failed to read icon at path: {}", path));
-                    let icon = load_image_sized(&bytes, ICON_SIZE, ICON_SIZE);
+                    let icon = load_image_sized(path, ICON_SIZE, ICON_SIZE);
                     if let Some(o) = cv.get_game_object_mut(tab_name(i)) {
                         o.set_image(icon);
                     }
@@ -169,4 +166,3 @@ pub fn register(cv: &mut Canvas, settings: Shared<TermSettings>) {
         });
     }
 }
-
